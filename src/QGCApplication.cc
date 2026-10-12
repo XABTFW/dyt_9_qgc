@@ -92,6 +92,7 @@
 
 
 #include "Mavlinktest2.h"
+#include "DytSerialBridge.h"
 #include "RadarBridge.h"
 #include "swarm_send.h"
 
@@ -324,6 +325,8 @@ void QGCApplication::init()
 
     qmlRegisterType<Mavlinktest2> ("QGroundControl.Controllers", 1, 0, "Mavlinktest2");
     qmlRegisterType<Swarm_send> ("QGroundControl.Controllers", 1, 0, "Swarmsend");
+    qmlRegisterSingletonInstance<DytSerialBridge>("QGroundControl.DytSerialBridge", 1, 0,
+                                                   "DytSerialBridge", DytSerialBridge::instance());
 
     qmlRegisterType<Mavlinktest>("QGroundControl.Controllers", 1, 0, "Mavlinktest");
 
@@ -366,6 +369,7 @@ void QGCApplication::_initForNormalAppBoot()
     LinkManager::instance()->init();
     MultiVehicleManager::instance()->init();
     MAVLinkProtocol::instance()->init();
+    DytSerialBridge::instance()->init();
     RadarBridge::instance()->init();
     VideoManager::instance()->init();
 

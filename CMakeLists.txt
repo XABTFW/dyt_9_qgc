@@ -287,6 +287,8 @@ qt_add_executable(${CMAKE_PROJECT_NAME}
     ${QGC_RESOURCES}
     src/Mavlinktest2.h
     src/Mavlinktest2.cpp
+    src/DytSerialBridge.h
+    src/DytSerialBridge.cc
     src/RadarBridge.h
     src/RadarBridge.cc
     src/swarm_send.cpp
@@ -294,6 +296,27 @@ qt_add_executable(${CMAKE_PROJECT_NAME}
     src/SwarmOperationHandler.cpp
     src/SwarmOperationHandler.h
 )
+
+if(MINGW)
+    target_compile_options(${CMAKE_PROJECT_NAME} PRIVATE -Wa,-mbig-obj)
+
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=libstdc++.a
+        OUTPUT_VARIABLE QGC_MINGW_LIBSTDCPP
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    execute_process(
+        COMMAND "${CMAKE_CXX_COMPILER}" -print-file-name=libmingw32.a
+        OUTPUT_VARIABLE QGC_MINGW_RUNTIME
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    get_filename_component(QGC_MINGW_LIBSTDCPP_DIR "${QGC_MINGW_LIBSTDCPP}" DIRECTORY)
+    get_filename_component(QGC_MINGW_RUNTIME_DIR "${QGC_MINGW_RUNTIME}" DIRECTORY)
+    target_link_options(${CMAKE_PROJECT_NAME} BEFORE PRIVATE
+        "-L${QGC_MINGW_LIBSTDCPP_DIR}"
+        "-L${QGC_MINGW_RUNTIME_DIR}"
+    )
+endif()
 
 if(WIN32)
     # CPMAddPackage(
@@ -325,6 +348,21 @@ if(WIN32)
         )
         list(APPEND QGC_INSTALLER_SOURCE_WIN_FILES "${QGC_INSTALLER_SOURCE_WIN}/${FILE_NAME}")
     endforeach()
+
+    if(MINGW)
+        set(QGC_WINDOWS_RESOURCE_COPY "${QGC_INSTALLER_SOURCE_WIN}/QGroundControl.rc")
+        set(QGC_WINDOWS_RESOURCE_OBJECT "${CMAKE_CURRENT_BINARY_DIR}/QGroundControl.rc.obj")
+        list(REMOVE_ITEM QGC_INSTALLER_SOURCE_WIN_FILES "${QGC_WINDOWS_RESOURCE_COPY}")
+        add_custom_command(
+            OUTPUT "${QGC_WINDOWS_RESOURCE_OBJECT}"
+            COMMAND "${CMAKE_RC_COMPILER}" -O coff -i QGroundControl.rc -o "${QGC_WINDOWS_RESOURCE_OBJECT}"
+            WORKING_DIRECTORY "${QGC_INSTALLER_SOURCE_WIN}"
+            DEPENDS "${QGC_WINDOWS_RESOURCE_COPY}" "${QGC_INSTALLER_SOURCE_WIN}/WindowsQGC.ico"
+            VERBATIM
+        )
+        set_source_files_properties("${QGC_WINDOWS_RESOURCE_OBJECT}" PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+        list(APPEND QGC_INSTALLER_SOURCE_WIN_FILES "${QGC_WINDOWS_RESOURCE_OBJECT}")
+    endif()
 
     target_sources(${CMAKE_PROJECT_NAME} PRIVATE ${QGC_INSTALLER_SOURCE_WIN_FILES})
     set_target_properties(${CMAKE_PROJECT_NAME}

@@ -20,6 +20,7 @@ import QtQml.Models
 import QGroundControl
 import QGroundControl.Controls
 import QGroundControl.Controllers
+import QGroundControl.DytSerialBridge
 import QGroundControl.Controls
 import QGroundControl.FactSystem
 import QGroundControl.FlightDisplay
@@ -73,7 +74,10 @@ Item {
     }
 
     on_ActiveVehicleChanged: enableSdm50LiveUpdates()
-    Component.onCompleted: enableSdm50LiveUpdates()
+    Component.onCompleted: {
+        enableSdm50LiveUpdates()
+        DytSerialBridge.refreshPorts()
+    }
 
     QGCToolInsets {
         id:                     _totalToolInsets
@@ -299,7 +303,7 @@ Item {
         color:                  qgcPal.window
         border.color:           qgcPal.text
         opacity:                0.94
-        visible:                _activeVehicle && _activeVehicle.dytTelemetryAvailable
+        visible:                _activeVehicle
         z:                      QGroundControl.zOrderWidgets + 2
 
         QGCPalette { id: qgcPal; colorGroupEnabled: true }
@@ -349,6 +353,81 @@ Item {
                     wrapMode: Text.WordWrap
                     text: _activeVehicle ? _activeVehicle.dytCommandResultText : ""
                 }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                QGCLabel { text: qsTr("TCS virtual port") }
+
+                QGCComboBox {
+                    id:                 dytSerialPortCombo
+                    Layout.fillWidth:   true
+                    model:              DytSerialBridge.availablePorts
+                    enabled:            !DytSerialBridge.connected
+                }
+
+                QGCButton {
+                    text:               qsTr("Refresh")
+                    enabled:            !DytSerialBridge.connected
+                    onClicked:          DytSerialBridge.refreshPorts()
+                }
+
+                QGCButton {
+                    text:               DytSerialBridge.connected ? qsTr("Disconnect") : qsTr("Connect")
+                    enabled:            DytSerialBridge.connected || dytSerialPortCombo.currentText.length > 0
+                    onClicked: {
+                        if (DytSerialBridge.connected) {
+                            DytSerialBridge.closePort()
+                        } else {
+                            DytSerialBridge.openPort(dytSerialPortCombo.currentText,
+                                                     parseInt(dytImageWidth.text),
+                                                     parseInt(dytImageHeight.text))
+                        }
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+
+                QGCLabel { text: qsTr("Image width") }
+                QGCTextField {
+                    id:                 dytImageWidth
+                    Layout.preferredWidth: ScreenTools.defaultFontPixelWidth * 8
+                    text:               DytSerialBridge.imageWidth.toString()
+                    numericValuesOnly:  true
+                    enabled:            !DytSerialBridge.connected
+                }
+
+                QGCLabel { text: qsTr("height") }
+                QGCTextField {
+                    id:                 dytImageHeight
+                    Layout.preferredWidth: ScreenTools.defaultFontPixelWidth * 8
+                    text:               DytSerialBridge.imageHeight.toString()
+                    numericValuesOnly:  true
+                    enabled:            !DytSerialBridge.connected
+                }
+
+                QGCButton {
+                    text:               qsTr("Resend last")
+                    enabled:            DytSerialBridge.connected
+                    onClicked:          DytSerialBridge.resendLastPoint()
+                }
+            }
+
+            QGCLabel {
+                Layout.fillWidth: true
+                wrapMode:        Text.WordWrap
+                text:            qsTr("Serial: %1 | Last TCS target: %2")
+                                     .arg(DytSerialBridge.statusText)
+                                     .arg(DytSerialBridge.lastPointText)
+            }
+
+            QGCLabel {
+                Layout.fillWidth: true
+                wrapMode:        Text.WordWrap
+                text:            _activeVehicle ? qsTr("Aircraft ACK: %1").arg(_activeVehicle.dytTrackPointResultText) : ""
             }
 
             QGCLabel {

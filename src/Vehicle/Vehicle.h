@@ -209,6 +209,7 @@ public:
     Q_PROPERTY(int               dytGuidancePhase               READ dytGuidancePhase                                              NOTIFY dytTelemetryChanged)
     Q_PROPERTY(QString           dytGuidancePhaseText           READ dytGuidancePhaseText                                          NOTIFY dytTelemetryChanged)
     Q_PROPERTY(QString           dytCommandResultText           READ dytCommandResultText                                          NOTIFY dytTelemetryChanged)
+    Q_PROPERTY(QString           dytTrackPointResultText        READ dytTrackPointResultText                                       NOTIFY dytTelemetryChanged)
     Q_PROPERTY(bool              dytTargetValid                 READ dytTargetValid                                                NOTIFY dytTelemetryChanged)
     Q_PROPERTY(double            dytRangeM                      READ dytRangeM                                                     NOTIFY dytTelemetryChanged)
     Q_PROPERTY(double            sdm50ClosingSpeedMps           READ sdm50ClosingSpeedMps                                          NOTIFY dytTelemetryChanged)
@@ -334,6 +335,9 @@ public:
     /// Request DYT phase 2 (midcourse) or phase 3 (terminal). The actual state is acknowledged in telemetry.
     Q_INVOKABLE void sendDytGuidanceCommand(int phase);
 
+    /// Send a TCS image pixel to the aircraft's DYT module.
+    Q_INVOKABLE bool sendDytTrackPointCommand(int x, int y, int imageWidth, int imageHeight);
+
     /// Command vehicle to change altitude
     ///     @param altitudeChange If > 0, go up by amount specified, if < 0, go down by amount specified
     ///     @param pauseVehicle true: pause vehicle prior to altitude change
@@ -446,6 +450,7 @@ public:
     int     dytGuidancePhase        () const { return _dytGuidancePhase; }
     QString dytGuidancePhaseText    () const { return _dytGuidancePhaseText; }
     QString dytCommandResultText    () const { return _dytCommandResultText; }
+    QString dytTrackPointResultText () const { return _dytTrackPointResultText; }
     bool    dytTargetValid          () const { return _dytTargetValid; }
     double  dytRangeM               () const { return _dytRangeM; }
     double  sdm50ClosingSpeedMps    () const { return _sdm50ClosingSpeedMps; }
@@ -1002,6 +1007,7 @@ private:
     void _handleDytSystemStatus         (const mavlink_message_t& message);
     void _handleDytTargetStatus         (const mavlink_message_t& message);
     void _handleDytStatusReply          (const mavlink_message_t& message);
+    void _handleDytTrackPointAck        (const mavlink_message_t& message);
     void _handleSdm50Status             (const mavlink_message_t& message);
     void _handleEvent(uint8_t comp_id, std::unique_ptr<events::parser::ParsedEvent> event);
     // ArduPilot dialect messages
@@ -1071,9 +1077,12 @@ private:
     uint32_t        _dytNetTriggerCount = 0;
     uint32_t        _dytNextRequestId = 0;
     uint32_t        _dytPendingRequestId = 0;
+    uint32_t        _dytTrackNextRequestId = 0;
+    uint32_t        _dytTrackPendingRequestId = 0;
     QString         _dytVehicleTypeText = tr("Unknown");
     QString         _dytGuidancePhaseText = tr("Disarmed");
     QString         _dytCommandResultText = tr("No command");
+    QString         _dytTrackPointResultText = tr("No track-point command");
     QString         _dytGuidanceDetails;
     QString         _dytTargetDetails;
     QString         _dytReplyDetails;

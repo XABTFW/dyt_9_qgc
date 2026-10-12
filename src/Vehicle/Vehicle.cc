@@ -67,6 +67,7 @@
 #endif
 
 #include <QtCore/QDateTime>
+#include <QtCore/QFile>
 
 #include <cstring>
 
@@ -78,6 +79,25 @@ constexpr uint32_t DYT_SYSTEM_STATUS_MSG_ID = 12926;
 constexpr uint32_t DYT_TARGET_STATUS_MSG_ID = 12927;
 constexpr uint32_t DYT_STATUS_REPLY_MSG_ID = 12928;
 constexpr uint32_t SDM50_STATUS_MSG_ID = 12929;
+constexpr uint32_t DYT_TRACK_POINT_ACK_MSG_ID = 12936;
+
+void traceDytTrackPointEvent(const QString& message)
+{
+    const QString tracePath = qEnvironmentVariable("QGC_TCS_TRACE_FILE").trimmed();
+
+    if (tracePath.isEmpty()) {
+        return;
+    }
+
+    QFile traceFile(tracePath);
+
+    if (traceFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
+        traceFile.write(QDateTime::currentDateTime().toString(Qt::ISODateWithMs).toUtf8());
+        traceFile.write(" ");
+        traceFile.write(message.toUtf8());
+        traceFile.write("\n");
+    }
+}
 }
 
 QGC_LOGGING_CATEGORY(VehicleLog, "VehicleLog")
@@ -546,6 +566,9 @@ void Vehicle::_mavlinkMessageReceived(LinkInterface* link, mavlink_message_t mes
         break;
     case DYT_STATUS_REPLY_MSG_ID:
         _handleDytStatusReply(message);
+        break;
+    case DYT_TRACK_POINT_ACK_MSG_ID:
+        _handleDytTrackPointAck(message);
         break;
     case SDM50_STATUS_MSG_ID:
         _handleSdm50Status(message);
@@ -2248,6 +2271,126 @@ void Vehicle::sendDytGuidanceCommand(int phase)
         _dytCommandResultText = tr("Request %1 sent, waiting for aircraft").arg(_dytNextRequestId);
         emit dytTelemetryChanged();
     }
+}
+
+bool Vehicle::sendDytTrackPointCommand(int x, int y, int imageWidth, int imageHeight)
+{
+    if (x < 0 || y < 0 || x > INT16_MAX || y > INT16_MAX ||
+        imageWidth <= 0 || imageWidth > UINT16_MAX ||
+        imageHeight <= 0 || imageHeight > UINT16_MAX ||
+        x >= imageWidth || y >= imageHeight) {
+        _dytTrackPointResultText = tr("Invalid track point (%1, %2) for %3 x %4 image")
+                                       .arg(x).arg(y).arg(imageWidth).arg(imageHeight);
+        emit dytTelemetryChanged();
+        return false;
+    }
+
+    SharedLinkInterfacePtr sharedLink = vehicleLinkManager()->primaryLink().lock();
+
+    if (!sharedLink) {
+        _dytTrackPointResultText = tr("Track point not sent: primary link unavailable");
+        emit dytTelemetryChanged();
+        return false;
+    }
+
+    const int centeredX = x - (imageWidth / 2);
+    const int centeredY = y - (imageHeight / 2);
+    QByteArray command = QStringLiteral("dyt_gimbal trackxy %1 %2\n").arg(centeredX).arg(centeredY).toLatin1();
+    const int commandSize = command.size();
+
+    if (commandSize > MAVLINK_MSG_SERIAL_CONTROL_FIELD_DATA_LEN) {
+        _dytTrackPointResultText = tr("Track-point shell command is too long");
+        emit dytTelemetryChanged();
+        return false;
+    }
+
+    command.append(MAVLINK_MSG_SERIAL_CONTROL_FIELD_DATA_LEN - commandSize, '\0');
+
+    mavlink_message_t message{};
+    mavlink_msg_serial_control_pack_chan(
+        static_cast<uint8_t>(MAVLinkProtocol::instance()->getSystemId()),
+        static_cast<uint8_t>(MAVLinkProtocol::getComponentId()),
+        sharedLink->mavlinkChannel(),
+        &message,
+        SERIAL_CONTROL_DEV_SHELL,
+        SERIAL_CONTROL_FLAG_EXCLUSIVE | SERIAL_CONTROL_FLAG_RESPOND | SERIAL_CONTROL_FLAG_MULTI,
+        0,
+        0,
+        static_cast<uint8_t>(commandSize),
+        reinterpret_cast<uint8_t *>(command.data()),
+        static_cast<uint8_t>(id()),
+        static_cast<uint8_t>(defaultComponentId()));
+
+    if (!sendMessageOnLinkThreadSafe(sharedLink.get(), message)) {
+        _dytTrackPointResultText = tr("Track point (%1, %2) could not be written to the primary link").arg(x).arg(y);
+        emit dytTelemetryChanged();
+        return false;
+    }
+
+    _dytTrackPendingRequestId = 0;
+    _dytTrackPointResultText = tr("Track point (%1, %2), centered (%3, %4), sent to aircraft gimbal")
+                                   .arg(x).arg(y).arg(centeredX).arg(centeredY);
+    traceDytTrackPointEvent(QStringLiteral("px4-shell trackxy sent centered=(%1,%2) absolute=(%3,%4) image=%5x%6 vehicle=%7")
+                                .arg(centeredX).arg(centeredY).arg(x).arg(y)
+                                .arg(imageWidth).arg(imageHeight).arg(id()));
+    emit dytTelemetryChanged();
+    return true;
+}
+
+void Vehicle::_handleDytTrackPointAck(const mavlink_message_t& message)
+{
+    if (message.len < MAVLINK_MSG_ID_DYT_TRACK_POINT_ACK_MIN_LEN) {
+        return;
+    }
+
+    mavlink_dyt_track_point_ack_t ack{};
+    mavlink_msg_dyt_track_point_ack_decode(&message, &ack);
+    traceDytTrackPointEvent(QStringLiteral("mavlink-12936 received request=%1 result=%2 pixel=(%3,%4) target=%5:%6")
+                                .arg(ack.request_id).arg(ack.result).arg(ack.x_px).arg(ack.y_px)
+                                .arg(ack.target_system).arg(ack.target_component));
+
+    const uint8_t groundSystemId = static_cast<uint8_t>(MAVLinkProtocol::instance()->getSystemId());
+    const uint8_t groundComponentId = static_cast<uint8_t>(MAVLinkProtocol::getComponentId());
+
+    if ((ack.target_system != 0 && ack.target_system != groundSystemId) ||
+        (ack.target_component != 0 && ack.target_component != groundComponentId) ||
+        _dytTrackPendingRequestId == 0 || ack.request_id != _dytTrackPendingRequestId) {
+        return;
+    }
+
+    switch (ack.result) {
+    case MAV_RESULT_ACCEPTED:
+        _dytTrackPointResultText = tr("Aircraft accepted track point (%1, %2), request %3")
+                                       .arg(ack.x_px).arg(ack.y_px).arg(ack.request_id);
+        break;
+    case MAV_RESULT_TEMPORARILY_REJECTED:
+        _dytTrackPointResultText = tr("Aircraft temporarily rejected track point (%1, %2), request %3")
+                                       .arg(ack.x_px).arg(ack.y_px).arg(ack.request_id);
+        break;
+    case MAV_RESULT_DENIED:
+        _dytTrackPointResultText = tr("Aircraft denied track point (%1, %2), request %3")
+                                       .arg(ack.x_px).arg(ack.y_px).arg(ack.request_id);
+        break;
+    case MAV_RESULT_UNSUPPORTED:
+        _dytTrackPointResultText = tr("Aircraft does not support track-point command, request %1").arg(ack.request_id);
+        break;
+    case MAV_RESULT_FAILED:
+        _dytTrackPointResultText = tr("Aircraft failed to publish track point (%1, %2), request %3")
+                                       .arg(ack.x_px).arg(ack.y_px).arg(ack.request_id);
+        break;
+    case MAV_RESULT_IN_PROGRESS:
+        _dytTrackPointResultText = tr("Aircraft is processing track point (%1, %2), request %3")
+                                       .arg(ack.x_px).arg(ack.y_px).arg(ack.request_id);
+        emit dytTelemetryChanged();
+        return;
+    default:
+        _dytTrackPointResultText = tr("Track-point request %1 returned result %2")
+                                       .arg(ack.request_id).arg(ack.result);
+        break;
+    }
+
+    _dytTrackPendingRequestId = 0;
+    emit dytTelemetryChanged();
 }
 
 void Vehicle::_handleDytSystemStatus(const mavlink_message_t& message)

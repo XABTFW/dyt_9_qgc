@@ -38,9 +38,9 @@ typedef enum : uint8_t {
 
 #include <mavlink_types.h>
 
-// QGC's generated "all" dialect does not contain the project-specific DYT
-// messages. Override the message lookup so the byte parser can validate their
-// CRC extras before Vehicle decodes the payloads.
+// Pin the project-specific DYT entries here as well as in the generated
+// dialect, so the byte parser always validates their CRC extras before Vehicle
+// decodes the payloads.
 #define MAVLINK_GET_MSG_ENTRY
 static inline const mavlink_msg_entry_t* mavlink_get_msg_entry(uint32_t msgid);
 
@@ -83,6 +83,8 @@ static inline const mavlink_msg_entry_t* mavlink_get_msg_entry(uint32_t msgid)
         { 12927, 157, 83, 83, 0, 0, 0 },
         { 12928, 227, 29, 29, 0, 0, 0 },
         { 12929, 172, 21, 21, 0, 0, 0 },
+        { 12935, 183, 14, 14, 3, 12, 13 },
+        { 12936, 26, 11, 11, 3, 8, 9 },
     };
 
     for (const mavlink_msg_entry_t& entry : dytEntries) {
